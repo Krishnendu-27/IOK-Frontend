@@ -66,7 +66,13 @@ const StudentRow = ({
 
   const studentId = student.studentId || student._id || student.id;
   const studentPhone = student.phone || student.phoneNumber || "-";
-  const studentPhoto = student.profilePic || student.profile_picture || "";
+  const studentPhoto =
+    student.profilePic ||
+    student.profilePicture ||
+    student.profile_picture ||
+    student.photo ||
+    student.image ||
+    "";
 
   const totalAmount = parseFloat(classFees) || 0;
   const finalAmount = totalAmount + fineAmount - discountAmount;
@@ -104,7 +110,7 @@ const StudentRow = ({
       } else {
         toast.success("No fine applicable");
       }
-    } catch (error) {
+    } catch {
       toast.error("Failed to calculate fine");
     } finally {
       setShowFineLoading(false);

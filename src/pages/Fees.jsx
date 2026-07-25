@@ -4,7 +4,7 @@ import useFeesStore from "../stores/useFeesStore";
 import useUserStore from "../stores/useUserStore";
 import FilterPanel from "../components/UI/FilterPanel";
 import StudentRow from "../components/UI/StudentRow";
-import DashboardCards from "../components/UI/DashboardCards"; // eslint-disable-line no-unused-vars
+import DashboardCards from "../components/UI/DashboardCards";
 import StudentSearch from "../components/UI/StudentSearch";
 import DiscountToggleButton from "../components/UI/DiscountToggleButton";
 import useAuthStore from "../stores/useAuthStore";
@@ -31,8 +31,6 @@ const Fees = () => {
     setSelectedBatch,
   } = useFeesStore();
 
-  const [classFeesAmount, setClassFeesAmount] = useState(0);
-  const [filteredBatches, setFilteredBatches] = useState([]);
   const [showDiscountFields, setShowDiscountFields] = useState(false);
   const [localSearchTerm, setLocalSearchTerm] = useState("");
 
@@ -46,17 +44,28 @@ const Fees = () => {
   const [pendingCurrentMonth, setPendingCurrentMonth] = useState(0);
   const [pendingPreviousMonth, setPendingPreviousMonth] = useState(0);
   const [pendingLoading, setPendingLoading] = useState(false);
+  const mainClassesCount = mainClasses?.length || 0;
+  const batchesCount = batches?.length || 0;
+  const allStudentsCount = allStudents?.length || 0;
 
   // BUG FIX: Prevent re-fetching if data already exists in Zustand to retain state on tab switch
   useEffect(() => {
-    const loadInitialData = async () => {
-      if (!mainClasses || mainClasses.length === 0) await fetchMainClasses();
-      if (!batches || batches.length === 0) await fetchBatches();
-      if (getStudents && (!allStudents || allStudents.length === 0))
-        getStudents();
-    };
-    loadInitialData();
-  }, []); // Empty dependency array prevents infinite loops on mount
+    if (mainClassesCount === 0) {
+      fetchMainClasses();
+    }
+  }, [fetchMainClasses, mainClassesCount]);
+
+  useEffect(() => {
+    if (batchesCount === 0) {
+      fetchBatches();
+    }
+  }, [fetchBatches, batchesCount]);
+
+  useEffect(() => {
+    if (getStudents && allStudentsCount === 0) {
+      getStudents();
+    }
+  }, [getStudents, allStudentsCount]);
 
   const teacherBatches = useMemo(() => {
     if (!isTeacher) return batches || [];
@@ -138,6 +147,71 @@ const Fees = () => {
     return studentList;
   }, [allStudents, isTeacher, teacherBatches, userRole]);
 
+  const getNormalizedStudentId = (student) =>
+    student?._id || student?.id || student?.studentId;
+
+  const studentLookup = useMemo(() => {
+    const lookup = new Map();
+    (allStudents || []).forEach((student) => {
+      [student?._id, student?.id, student?.studentId]
+        .filter(Boolean)
+        .forEach((id) => lookup.set(String(id), student));
+    });
+    return lookup;
+  }, [allStudents]);
+
+  const hydratedBatchStudents = useMemo(
+    () =>
+      (students || []).map((student) => {
+        const studentId = getNormalizedStudentId(student);
+        const fullStudent = studentLookup.get(String(studentId));
+        return fullStudent
+          ? { ...fullStudent, ...student, _id: fullStudent._id || studentId }
+          : student;
+      }),
+    [students, studentLookup],
+  );
+
+  const classFeesAmount = useMemo(() => {
+    const selectedClass = mainClasses?.find(
+      (mc) => mc._id === selectedMainClass,
+    );
+    return selectedClass?.fees || 0;
+  }, [mainClasses, selectedMainClass]);
+
+  const filteredBatches = useMemo(() => {
+    if (!selectedMainClass) return [];
+
+    let relevantBatches =
+      batches?.filter((batch) =>
+        batch.mainClasses?.some(
+          (mc) => mc._id === selectedMainClass || mc === selectedMainClass,
+        ),
+      ) || [];
+
+    if (isTeacher) {
+      relevantBatches = filterBatchesForTeacher(
+        relevantBatches,
+        userData?.batches || [],
+        userRole,
+        userData?.email,
+        userData?._id,
+      );
+    } else if (userRole === "Student") {
+      relevantBatches = relevantBatches.filter((batch) => {
+        const inStudents = batch.students?.some(
+          (s) => (s._id || s) === userData?._id,
+        );
+        const inPairs = batch.mainClassStudentPairs?.some(
+          (p) => (p.student?._id || p.student) === userData?._id,
+        );
+        return inStudents || inPairs;
+      });
+    }
+
+    return relevantBatches;
+  }, [selectedMainClass, batches, userRole, userData, isTeacher]);
+
   useEffect(() => {
     if (!selectedMainClass || !mainClasses?.length) return;
     if (!displayedCourseIds.has(String(selectedMainClass))) {
@@ -151,49 +225,6 @@ const Fees = () => {
     setSelectedMainClass,
     setSelectedBatch,
   ]);
-
-  // Fetch students when main class is selected
-  useEffect(() => {
-    if (selectedMainClass) {
-      const selectedClass = mainClasses?.find(
-        (mc) => mc._id === selectedMainClass,
-      );
-      if (selectedClass) {
-        setClassFeesAmount(selectedClass.fees);
-      }
-
-      let relevantBatches =
-        batches?.filter((batch) =>
-          batch.mainClasses?.some(
-            (mc) => mc._id === selectedMainClass || mc === selectedMainClass,
-          ),
-        ) || [];
-
-      if (isTeacher) {
-        relevantBatches = filterBatchesForTeacher(
-          relevantBatches,
-          userData?.batches || [],
-          userRole,
-          userData?.email,
-          userData?._id,
-        );
-      } else if (userRole === "Student") {
-        relevantBatches = relevantBatches.filter((batch) => {
-          const inStudents = batch.students?.some(
-            (s) => (s._id || s) === userData?._id,
-          );
-          const inPairs = batch.mainClassStudentPairs?.some(
-            (p) => (p.student?._id || p.student) === userData?._id,
-          );
-          return inStudents || inPairs;
-        });
-      }
-
-      setFilteredBatches(relevantBatches);
-    } else {
-      setFilteredBatches([]);
-    }
-  }, [selectedMainClass, mainClasses, batches, userRole, userData, isTeacher]);
 
   useEffect(() => {
     if (!selectedBatch || !selectedMainClass) return;
@@ -211,7 +242,7 @@ const Fees = () => {
 
   // BUG FIX: Fallback to empty array to prevent mapping crashes and restrict for students
   const displayedStudents = useMemo(() => {
-    const allBatchStudents = students || [];
+    const allBatchStudents = hydratedBatchStudents || [];
 
     let result = allBatchStudents;
 
@@ -231,7 +262,7 @@ const Fees = () => {
       );
     }
     return result;
-  }, [localSearchTerm, students, userRole, userData]);
+  }, [localSearchTerm, hydratedBatchStudents, userRole, userData]);
 
   const getMonthLabel = (date) =>
     date.toLocaleString("default", { month: "long", year: "numeric" });
@@ -562,7 +593,7 @@ const Fees = () => {
                 <tbody className="divide-y divide-border/50">
                   {displayedStudents.map((student) => (
                     <StudentRow
-                      key={student._id}
+                      key={getNormalizedStudentId(student)}
                       student={student}
                       mainClassId={selectedMainClass}
                       classFees={classFeesAmount}
