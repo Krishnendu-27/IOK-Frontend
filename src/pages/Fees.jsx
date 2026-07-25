@@ -150,6 +150,21 @@ const Fees = () => {
   const getNormalizedStudentId = (student) =>
     student?._id || student?.id || student?.studentId;
 
+  const getStudentPhoto = (student) => {
+    const photo =
+      student?.profilePic ||
+      student?.profilePicture ||
+      student?.profile_picture ||
+      student?.photo ||
+      student?.image;
+
+    if (photo) return photo;
+
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(
+      student?.name || "Student",
+    )}&background=e0e7ff&color=4f46e5`;
+  };
+
   const studentLookup = useMemo(() => {
     const lookup = new Map();
     (allStudents || []).forEach((student) => {
@@ -461,20 +476,34 @@ const Fees = () => {
             <div className="mt-4 border border-border rounded-xl overflow-hidden divide-y divide-border/50 max-h-60 overflow-y-auto">
               {globalSearchResults.map((student) => (
                 <div
-                  key={student._id}
-                  className="flex items-center justify-between p-3 bg-muted/20 hover:bg-muted/50 transition-colors"
+                  key={getNormalizedStudentId(student)}
+                  className="flex items-center justify-between gap-3 p-3 bg-muted/20 hover:bg-muted/50 transition-colors"
                 >
-                  <div>
-                    <p className="font-semibold text-foreground">
-                      {student.name}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Phone: {student.phone} | Email: {student.email}
-                    </p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <img
+                      src={getStudentPhoto(student)}
+                      alt={student.name || "Student"}
+                      className="h-12 w-12 flex-none rounded-full border border-border bg-muted object-cover"
+                      onError={(event) => {
+                        event.currentTarget.onerror = null;
+                        event.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                          student?.name || "Student",
+                        )}&background=e0e7ff&color=4f46e5`;
+                      }}
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-foreground">
+                        {student.name}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        Phone: {student.phone || "N/A"} | Email:{" "}
+                        {student.email || "N/A"}
+                      </p>
+                    </div>
                   </div>
                   <button
                     onClick={() => handleAutoSelectStudent(student)}
-                    className="bg-primary hover:opacity-90 text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    className="flex-none bg-primary hover:opacity-90 text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                   >
                     Locate & Select
                   </button>

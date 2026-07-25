@@ -931,30 +931,30 @@ const FeesYearlyStatus = () => {
             ) : students && students.length > 0 ? (
               <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden print:border-none print:shadow-none print:overflow-visible">
                 {/* overflow-visible ensures no scrollbar rendering on print */}
-                <div className="overflow-x-auto print:overflow-visible">
+                <div className="max-h-[70vh] overflow-auto print:max-h-none print:overflow-visible">
                   <table className="w-full border-collapse text-sm print:border print:border-gray-400 print:text-[11px]">
                     <thead className="print:static">
-                      <tr className="sticky top-0 z-20 bg-card border-b border-border print:static print:bg-gray-100">
+                      <tr className="border-b border-border print:bg-gray-100">
                         {/* Conditional Student ID Header */}
                         <th
-                          className={`px-4 py-3 text-left font-semibold text-muted-foreground sticky left-0 z-10 bg-card w-32 print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-2 print:py-1 ${!printConfig.showId ? "print:hidden" : ""}`}
+                          className={`px-4 py-3 text-left font-semibold text-muted-foreground sticky top-0 left-0 z-30 bg-card w-32 print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-2 print:py-1 ${!printConfig.showId ? "print:hidden" : ""}`}
                         >
                           ID
                         </th>
 
-                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground sticky left-0 z-10 bg-card w-48 print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-2 print:py-1">
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground sticky top-0 left-0 z-30 bg-card w-48 print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-2 print:py-1">
                           Student Name
                         </th>
 
                         {months.map((month) => (
                           <th
                             key={month}
-                            className="px-3 py-3 text-center font-semibold text-muted-foreground whitespace-nowrap print:text-gray-800 print:border print:border-gray-400 print:px-1 print:py-1 print:w-[5%]"
+                            className="px-3 py-3 text-center font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-card print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-1 print:py-1 print:w-[5%]"
                           >
                             {month.substring(0, 3).toUpperCase()}
                           </th>
                         ))}
-                        <th className="px-4 py-3 text-center font-semibold text-muted-foreground whitespace-nowrap print:hidden">
+                        <th className="px-4 py-3 text-center font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-card print:hidden">
                           Actions
                         </th>
                       </tr>
