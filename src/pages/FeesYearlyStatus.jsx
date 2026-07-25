@@ -12,6 +12,7 @@ import toast from "react-hot-toast";
 import axios from "axios";
 import useFeesStore from "../stores/useFeesStore";
 import useAuthStore from "../stores/useAuthStore";
+import useUserStore from "../stores/useUserStore";
 import { filterBatchesForTeacher } from "../util/teacherAccessControl";
 import { Image } from "../assets/Image";
 import { getStudentId } from "../util/getStudentId";
@@ -41,9 +42,11 @@ const FeesYearlyStatus = () => {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [hoveredCell, setHoveredCell] = useState(null);
   const [feesData, setFeesData] = useState({});
+  const [enrollmentDates, setEnrollmentDates] = useState({});
   const [undoStudentId, setUndoStudentId] = useState(null);
   const [undoingFeesId, setUndoingFeesId] = useState(null);
   const canUndoPayments = userRole === "Admin" || userRole === "Teacher";
+  const { students: allStudents, getStudents } = useUserStore();
 
   // Print Options Customization States
   const [showPrintOptions] = useState(false);
@@ -113,6 +116,12 @@ const FeesYearlyStatus = () => {
   }, [fetchMainClasses, fetchBatches]);
 
   useEffect(() => {
+    if (getStudents && (!allStudents || allStudents.length === 0)) {
+      getStudents();
+    }
+  }, [getStudents, allStudents]);
+
+  useEffect(() => {
     if (selectedMainClass) {
       let relevantBatches = batches.filter((batch) =>
         batch.mainClasses?.some(
@@ -172,14 +181,39 @@ const FeesYearlyStatus = () => {
     setSelectedYear(year);
   };
 
+  const studentLookup = useMemo(() => {
+    const lookup = new Map();
+    (allStudents || []).forEach((student) => {
+      [student?._id, student?.id, student?.studentId]
+        .filter(Boolean)
+        .forEach((id) => lookup.set(String(id), student));
+    });
+    return lookup;
+  }, [allStudents]);
+
+  const getNormalizedStudentId = (student) =>
+    student?._id || student?.id || student?.studentId;
+
+  const hydratedStudents = useMemo(
+    () =>
+      (students || []).map((student) => {
+        const studentId = getNormalizedStudentId(student);
+        const fullStudent = studentLookup.get(String(studentId));
+        return fullStudent
+          ? { ...fullStudent, ...student, _id: fullStudent._id || studentId }
+          : student;
+      }),
+    [students, studentLookup],
+  );
+
   const filteredStudents = useMemo(() => {
     if (userRole === "Student") {
-      return students.filter(
-        (s) => (s._id || s.id || s.studentId) === userData?._id,
+      return hydratedStudents.filter(
+        (s) => String(getNormalizedStudentId(s)) === String(userData?._id),
       );
     }
-    return students;
-  }, [students, userRole, userData]);
+    return hydratedStudents;
+  }, [hydratedStudents, userRole, userData]);
 
   const displayedMainClasses = useMemo(() => {
     if (!mainClasses) return [];
@@ -242,6 +276,7 @@ const FeesYearlyStatus = () => {
         return;
 
       const newFeesData = {};
+      const newEnrollmentDates = {};
       let apiUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 
       const authState = useAuthStore.getState();
@@ -253,16 +288,24 @@ const FeesYearlyStatus = () => {
 
       await Promise.all(
         filteredStudents.map(async (student) => {
-          const studentId = student.studentId || student._id || student.id;
+          const studentId = getNormalizedStudentId(student);
           if (!studentId) return;
 
           try {
-            const response = await axios.get(
-              `${apiUrl}/fees/history/${selectedMainClass}/${studentId}?t=${Date.now()}`,
-              { headers: { Authorization: `Bearer ${token}` } },
-            );
+            const [historyResponse, detailsResponse] = await Promise.all([
+              axios.get(
+                `${apiUrl}/fees/history/${selectedMainClass}/${studentId}?t=${Date.now()}`,
+                { headers: { Authorization: `Bearer ${token}` } },
+              ),
+              axios
+                .get(
+                  `${apiUrl}/fees/details/${selectedMainClass}/${studentId}?t=${Date.now()}`,
+                  { headers: { Authorization: `Bearer ${token}` } },
+                )
+                .catch(() => null),
+            ]);
 
-            const rawData = response.data || {};
+            const rawData = historyResponse.data || {};
             let history = [];
 
             if (Array.isArray(rawData)) {
@@ -280,6 +323,16 @@ const FeesYearlyStatus = () => {
             }
 
             newFeesData[studentId] = Array.isArray(history) ? history : [];
+
+            const detailsPayload =
+              detailsResponse?.data?.data || detailsResponse?.data || {};
+            const enrollmentDate =
+              detailsPayload.admissionDate ||
+              detailsPayload.courseStartDate ||
+              detailsPayload.startDate;
+            if (enrollmentDate) {
+              newEnrollmentDates[studentId] = enrollmentDate;
+            }
           } catch (error) {
             console.error("Failed to fetch fees for", student.name, error);
             newFeesData[studentId] = [];
@@ -287,6 +340,10 @@ const FeesYearlyStatus = () => {
         }),
       );
       setFeesData((previous) => ({ ...previous, ...newFeesData }));
+      setEnrollmentDates((previous) => ({
+        ...previous,
+        ...newEnrollmentDates,
+      }));
     };
 
     fetchAllFees();
@@ -387,7 +444,7 @@ const FeesYearlyStatus = () => {
       return "preEnrollment";
     }
 
-    const studentId = student.studentId || student._id || student.id;
+    const studentId = getNormalizedStudentId(student);
     const monthString = `${months[monthIndex]} ${year}`;
     const feeRecords = feesData[studentId] || [];
 
@@ -414,7 +471,7 @@ const FeesYearlyStatus = () => {
       case "partial":
         return "bg-yellow-100 border-yellow-500 text-yellow-700";
       case "preEnrollment":
-        return "bg-blue-100 border-blue-500 text-blue-700";
+        return "bg-blue-700 border-white-900 text-blue-1400";
       case "unpaid":
         return "bg-gray-100 border-gray-400 text-gray-700";
       default:
@@ -438,7 +495,13 @@ const FeesYearlyStatus = () => {
   const yearOptions = Array.from({ length: 5 }, (_, i) => selectedYear - 2 + i);
 
   const getStudentEnrollmentDate = (student) => {
-    const studentId = student?.studentId || student?._id || student?.id;
+    const studentId = getNormalizedStudentId(student);
+    const enrollmentDate = enrollmentDates[studentId];
+    if (enrollmentDate) {
+      const date = new Date(enrollmentDate);
+      if (!Number.isNaN(date.getTime())) return date;
+    }
+
     const selectedBatchData = filteredBatches.find(
       (batch) => batch._id === selectedBatch,
     );
@@ -461,12 +524,18 @@ const FeesYearlyStatus = () => {
 
     const dateValue =
       enrollmentPair?.admissionDate ||
+      enrollmentPair?.joinDate ||
+      enrollmentPair?.startDate ||
       enrollmentPair?.enrolledAt ||
       enrollmentPair?.createdAt ||
       studentClass?.admissionDate ||
+      studentClass?.joinDate ||
+      studentClass?.startDate ||
       studentClass?.enrolledAt ||
       studentClass?.createdAt ||
       student?.admissionDate ||
+      student?.joinDate ||
+      student?.startDate ||
       selectedClass?.startDate ||
       student?.createdAt;
 
@@ -498,7 +567,7 @@ const FeesYearlyStatus = () => {
       };
     }
 
-    const studentId = student.studentId || student._id || student.id;
+    const studentId = getNormalizedStudentId(student);
     const monthString = `${months[monthIndex]} ${year}`;
     const feeRecords = feesData[studentId] || [];
 
@@ -833,7 +902,7 @@ const FeesYearlyStatus = () => {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gray-100 border-2 border-gray-400 rounded flex items-center justify-center text-gray-700 text-xs print:w-5 print:h-5 print:border print:border-gray-400 print:text-gray-800">
+              <div className="w-8 h-8 bg-blue-200 border-2 border-blue-700 rounded flex items-center justify-center text-blue-900 text-xs print:w-5 print:h-5 print:border print:border-gray-400 print:text-gray-800">
                 -
               </div>
               <span className="print:text-gray-800 font-medium">Unpaid</span>
@@ -864,16 +933,16 @@ const FeesYearlyStatus = () => {
                 {/* overflow-visible ensures no scrollbar rendering on print */}
                 <div className="overflow-x-auto print:overflow-visible">
                   <table className="w-full border-collapse text-sm print:border print:border-gray-400 print:text-[11px]">
-                    <thead>
-                      <tr className="bg-muted/50 border-b border-border print:bg-gray-100">
+                    <thead className="print:static">
+                      <tr className="sticky top-0 z-20 bg-card border-b border-border print:static print:bg-gray-100">
                         {/* Conditional Student ID Header */}
                         <th
-                          className={`px-4 py-3 text-left font-semibold text-muted-foreground sticky left-0 z-10 bg-muted/50 w-32 print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-2 print:py-1 ${!printConfig.showId ? "print:hidden" : ""}`}
+                          className={`px-4 py-3 text-left font-semibold text-muted-foreground sticky left-0 z-10 bg-card w-32 print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-2 print:py-1 ${!printConfig.showId ? "print:hidden" : ""}`}
                         >
                           ID
                         </th>
 
-                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground sticky left-0 z-10 bg-muted/50 w-48 print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-2 print:py-1">
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground sticky left-0 z-10 bg-card w-48 print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-2 print:py-1">
                           Student Name
                         </th>
 
