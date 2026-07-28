@@ -17,6 +17,53 @@ import { TRADES, getTradeLabel } from "../../constants/trades";
 import { filterBatchesForTeacher } from "../../util/teacherAccessControl";
 import { Helmet } from "react-helmet-async";
 
+const WEEKDAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+const getWeekdayOrder = (weekday) => {
+  const index = WEEKDAYS.findIndex(
+    (day) => day.toLowerCase() === String(weekday || "").toLowerCase(),
+  );
+  return index === -1 ? WEEKDAYS.length : index;
+};
+
+const getTimeValue = (time) => {
+  if (!time) return Number.MAX_SAFE_INTEGER;
+  const match = String(time)
+    .trim()
+    .match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+
+  if (!match) return Number.MAX_SAFE_INTEGER;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] || 0);
+  const meridiem = match[3]?.toUpperCase();
+
+  if (meridiem === "PM" && hours < 12) hours += 12;
+  if (meridiem === "AM" && hours === 12) hours = 0;
+
+  return hours * 60 + minutes;
+};
+
+const formatTime12Hour = (time) => {
+  const minutesFromMidnight = getTimeValue(time);
+  if (minutesFromMidnight === Number.MAX_SAFE_INTEGER) return time || "-";
+
+  const hours24 = Math.floor(minutesFromMidnight / 60);
+  const minutes = minutesFromMidnight % 60;
+  const meridiem = hours24 >= 12 ? "PM" : "AM";
+  const hours12 = hours24 % 12 || 12;
+
+  return `${hours12}:${String(minutes).padStart(2, "0")} ${meridiem}`;
+};
+
 // --- Reusable Confirmation Modal ---
 const ConfirmModal = ({
   isOpen,
@@ -81,6 +128,7 @@ const BatchList = () => {
   const userRole = useAuthStore((state) => state.userRole);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTradeId, setSelectedTradeId] = useState("");
+  const [selectedWeekday, setSelectedWeekday] = useState("");
   const batchTradeMap = useTradeStore((state) => state.batchTradeMap);
 
   useEffect(() => {
@@ -113,29 +161,52 @@ const BatchList = () => {
     return batches;
   }, [batches, userRole, user]);
 
-  const filteredBatches = batchesForUser.filter((batch) => {
-    const query = searchQuery.toLowerCase();
-    const matchesSearch =
-      batch.name?.toLowerCase().includes(query) ||
-      batch.weekday?.toLowerCase().includes(query) ||
-      batch.teacherEmail?.toLowerCase().includes(query) ||
-      (Array.isArray(batch.teachers) &&
-        batch.teachers.some(
-          (t) =>
-            t.name?.toLowerCase().includes(query) ||
-            t.email?.toLowerCase().includes(query),
-        ));
+  const filteredBatches = useMemo(() => {
+    return batchesForUser
+      .filter((batch) => {
+        const query = searchQuery.toLowerCase();
+        const matchesSearch =
+          batch.name?.toLowerCase().includes(query) ||
+          batch.weekday?.toLowerCase().includes(query) ||
+          batch.teacherEmail?.toLowerCase().includes(query) ||
+          (Array.isArray(batch.teachers) &&
+            batch.teachers.some(
+              (t) =>
+                t.name?.toLowerCase().includes(query) ||
+                t.email?.toLowerCase().includes(query),
+            ));
 
-    const tradeId = batchTradeMap[batch._id] || "";
-    const matchesTrade =
-      selectedTradeId === ""
-        ? true
-        : selectedTradeId === "unassigned"
-          ? !tradeId
-          : tradeId === selectedTradeId;
+        const tradeId = batchTradeMap[batch._id] || "";
+        const matchesTrade =
+          selectedTradeId === ""
+            ? true
+            : selectedTradeId === "unassigned"
+              ? !tradeId
+              : tradeId === selectedTradeId;
+        const matchesWeekday =
+          selectedWeekday === "" ||
+          String(batch.weekday || "").toLowerCase() ===
+            selectedWeekday.toLowerCase();
 
-    return matchesSearch && matchesTrade;
-  });
+        return matchesSearch && matchesTrade && matchesWeekday;
+      })
+      .sort((a, b) => {
+        const dayDifference =
+          getWeekdayOrder(a.weekday) - getWeekdayOrder(b.weekday);
+        if (dayDifference !== 0) return dayDifference;
+
+        const timeDifference = getTimeValue(a.startTime) - getTimeValue(b.startTime);
+        if (timeDifference !== 0) return timeDifference;
+
+        return String(a.name || "").localeCompare(String(b.name || ""));
+      });
+  }, [
+    batchesForUser,
+    batchTradeMap,
+    searchQuery,
+    selectedTradeId,
+    selectedWeekday,
+  ]);
 
   const getHeaderContent = (role) => {
     switch (role) {
@@ -208,6 +279,21 @@ const BatchList = () => {
               {TRADES.map((trade) => (
                 <option key={trade.id} value={trade.id}>
                   {trade.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="w-full sm:w-48">
+            <select
+              value={selectedWeekday}
+              onChange={(e) => setSelectedWeekday(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-border bg-background/60 backdrop-blur-xl text-foreground focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none transition-all shadow-sm appearance-none cursor-pointer"
+            >
+              <option value="">All Days</option>
+              {WEEKDAYS.map((day) => (
+                <option key={day} value={day}>
+                  {day}
                 </option>
               ))}
             </select>
@@ -299,7 +385,8 @@ const BatchList = () => {
                   <div className="space-y-3 text-sm text-muted-foreground">
                     <p className="flex items-center gap-2">
                       <Clock className="w-4 h-4 shrink-0 text-muted-foreground/70" />
-                      {batch.startTime} - {batch.endTime}
+                      {formatTime12Hour(batch.startTime)} -{" "}
+                      {formatTime12Hour(batch.endTime)}
                     </p>
                     <p className="flex items-center gap-2">
                       <User className="w-4 h-4 shrink-0 text-muted-foreground/70" />
