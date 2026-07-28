@@ -194,6 +194,13 @@ const FeesYearlyStatus = () => {
   const getNormalizedStudentId = (student) =>
     student?._id || student?.id || student?.studentId;
 
+  const getStudentPhoto = (student) =>
+    student?.profilePic ||
+    student?.profilePicture ||
+    student?.profile_picture ||
+    student?.photo ||
+    student?.image;
+
   const hydratedStudents = useMemo(
     () =>
       (students || []).map((student) => {
@@ -942,8 +949,8 @@ const FeesYearlyStatus = () => {
                           ID
                         </th>
 
-                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground sticky top-0 left-0 z-30 bg-card w-48 print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-2 print:py-1">
-                          Student Name
+                        <th className="px-4 py-3 text-left font-semibold text-muted-foreground sticky top-0 left-0 z-30 bg-card w-56 print:static print:text-gray-800 print:bg-gray-100 print:border print:border-gray-400 print:px-2 print:py-1">
+                          Student
                         </th>
 
                         {months.map((month) => (
@@ -984,8 +991,28 @@ const FeesYearlyStatus = () => {
                               {getStudentId(student)}
                             </td>
 
-                            <td className="px-4 py-3 font-medium text-foreground sticky left-0 z-10 bg-background hover:bg-muted/30 w-48 print:static print:text-gray-800 print:border print:border-gray-400 print:px-2 print:py-1">
-                              {student.name}
+                            <td className="px-4 py-3 font-medium text-foreground sticky left-0 z-10 bg-background hover:bg-muted/30 w-56 print:static print:text-gray-800 print:border print:border-gray-400 print:px-2 print:py-1">
+                              <div className="flex items-center gap-3 print:gap-2">
+                                <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center overflow-hidden shrink-0 font-bold print:w-8 print:h-8">
+                                  {getStudentPhoto(student) ? (
+                                    <img
+                                      src={getStudentPhoto(student)}
+                                      alt={student.name || "Student"}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    (student.name?.charAt(0) || "S").toUpperCase()
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="truncate">
+                                    {student.name}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground print:text-gray-700">
+                                    ID: {getStudentId(student)}
+                                  </div>
+                                </div>
+                              </div>
                             </td>
 
                             {months.map((month, monthIndex) => {

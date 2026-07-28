@@ -33,6 +33,42 @@ const getMonthRange = (monthValue) => {
   };
 };
 
+const getEntityId = (entity) => {
+  if (!entity) return "";
+  if (typeof entity === "string") return entity;
+  return entity._id || entity.id || entity.studentId || "";
+};
+
+const idsMatch = (left, right) =>
+  Boolean(getEntityId(left) && getEntityId(right)) &&
+  String(getEntityId(left)) === String(getEntityId(right));
+
+const getBatchCourseIds = (batch) => {
+  const courseIds = new Set();
+
+  batch?.mainClasses?.forEach((course) => {
+    const courseId = getEntityId(course);
+    if (courseId) courseIds.add(String(courseId));
+  });
+
+  batch?.mainClassStudentPairs?.forEach((pair) => {
+    const courseId = getEntityId(pair?.mainClass);
+    if (courseId) courseIds.add(String(courseId));
+  });
+
+  return courseIds;
+};
+
+const batchHasStudent = (batch, studentId) => {
+  const inStudents = batch?.students?.some((student) =>
+    idsMatch(student, studentId),
+  );
+  const inPairs = batch?.mainClassStudentPairs?.some((pair) =>
+    idsMatch(pair?.student, studentId),
+  );
+  return inStudents || inPairs;
+};
+
 const AttendanceStatus = () => {
   const userId = useAuthStore((state) => state.id);
   const userRole = useAuthStore((state) => state.userRole);
@@ -47,6 +83,7 @@ const AttendanceStatus = () => {
   } = useAttendanceStore();
 
   const [selectedBatchId, setSelectedBatchId] = useState("");
+  const [selectedMainClassId, setSelectedMainClassId] = useState("");
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -80,16 +117,82 @@ const AttendanceStatus = () => {
       );
     }
     if (userRole === "Student") {
-      return batches.filter((batch) => {
-        const inStudents = batch.students?.some((s) => (s._id || s) === userId);
-        const inPairs = batch.mainClassStudentPairs?.some(
-          (p) => (p.student?._id || p.student) === userId,
-        );
-        return inStudents || inPairs;
-      });
+      return batches.filter((batch) => batchHasStudent(batch, userId));
     }
     return [];
   }, [batches, userRole, userData, userId]);
+
+  const displayedMainClasses = useMemo(() => {
+    if (userRole !== "Student") return [];
+
+    const classMap = new Map();
+
+    userData?.mainClasses?.forEach((course) => {
+      const courseId = getEntityId(course);
+      if (courseId) {
+        classMap.set(String(courseId), {
+          _id: courseId,
+          name: course.name || "Course",
+        });
+      }
+    });
+
+    displayedBatches.forEach((batch) => {
+      batch?.mainClasses?.forEach((course) => {
+        const courseId = getEntityId(course);
+        if (courseId && !classMap.has(String(courseId))) {
+          classMap.set(String(courseId), {
+            _id: courseId,
+            name: course.name || "Course",
+          });
+        }
+      });
+
+      batch?.mainClassStudentPairs?.forEach((pair) => {
+        if (!idsMatch(pair?.student, userId)) return;
+        const courseId = getEntityId(pair?.mainClass);
+        if (courseId && !classMap.has(String(courseId))) {
+          classMap.set(String(courseId), {
+            _id: courseId,
+            name: pair?.mainClass?.name || "Course",
+          });
+        }
+      });
+    });
+
+    return Array.from(classMap.values());
+  }, [displayedBatches, userRole, userData, userId]);
+
+  const selectableBatches = useMemo(() => {
+    if (userRole !== "Student" || !selectedMainClassId) {
+      return displayedBatches;
+    }
+
+    return displayedBatches.filter((batch) =>
+      getBatchCourseIds(batch).has(String(selectedMainClassId)),
+    );
+  }, [displayedBatches, selectedMainClassId, userRole]);
+
+  useEffect(() => {
+    if (userRole !== "Student") return;
+    if (!selectedMainClassId && displayedMainClasses.length > 0) {
+      setSelectedMainClassId(String(displayedMainClasses[0]._id));
+    }
+  }, [displayedMainClasses, selectedMainClassId, userRole]);
+
+  useEffect(() => {
+    if (!selectedBatchId) return;
+    if (!selectableBatches.some((batch) => idsMatch(batch, selectedBatchId))) {
+      setSelectedBatchId("");
+    }
+  }, [selectableBatches, selectedBatchId]);
+
+  useEffect(() => {
+    if (selectedBatchId || selectableBatches.length === 0) return;
+    if (userRole === "Student") {
+      setSelectedBatchId(getEntityId(selectableBatches[0]));
+    }
+  }, [selectableBatches, selectedBatchId, userRole]);
 
   // Enforce student selection constraints
   useEffect(() => {
@@ -103,7 +206,7 @@ const AttendanceStatus = () => {
       if (
         !selectedStudentId ||
         !batchStudents.some(
-          (s) => (s._id || s.id || s.studentId) === selectedStudentId,
+          (s) => idsMatch(s, selectedStudentId),
         )
       ) {
         setSelectedStudentId(
@@ -124,13 +227,14 @@ const AttendanceStatus = () => {
       try {
         // 1. Fetch batch information to get the student list
         const batchResponse = await api.get(`/batch/show/${selectedBatchId}`);
-        const batchData = batchResponse.data || batchResponse.data?.data;
+        const batchData = batchResponse.data?.data || batchResponse.data;
         const pairs = batchData?.mainClassStudentPairs || [];
 
         const studentMap = new Map();
         pairs.forEach((pair) => {
-          if (pair?.student?._id) {
-            studentMap.set(pair.student._id, pair.student);
+          const studentId = getEntityId(pair?.student);
+          if (studentId && typeof pair?.student === "object") {
+            studentMap.set(String(studentId), pair.student);
           }
         });
 
@@ -186,10 +290,10 @@ const AttendanceStatus = () => {
       const dateStr = record.date.split("T")[0]; // YYYY-MM-DD local
 
       const isPresent = record.Present_students?.some(
-        (s) => (s._id || s.id || s) === selectedStudentId,
+        (s) => idsMatch(s, selectedStudentId),
       );
       const isAbsent = record.Absent_students?.some(
-        (s) => (s._id || s.id || s) === selectedStudentId,
+        (s) => idsMatch(s, selectedStudentId),
       );
 
       if (isPresent) {
@@ -240,7 +344,34 @@ const AttendanceStatus = () => {
         <BackButton details="Track individual student attendance by batch and month." />
 
         <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
-          <div className={`grid grid-cols-1 md:grid-cols-3 gap-4`}>
+          <div
+            className={`grid grid-cols-1 ${userRole === "Student" ? "md:grid-cols-3" : "md:grid-cols-3"} gap-4`}
+          >
+            {userRole === "Student" && (
+              <div>
+                <label className="text-sm font-semibold text-foreground mb-2 block">
+                  Course
+                </label>
+                <select
+                  value={selectedMainClassId}
+                  onChange={(event) => {
+                    setSelectedMainClassId(event.target.value);
+                    setSelectedBatchId("");
+                  }}
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                >
+                  <option value="" disabled>
+                    Select a course...
+                  </option>
+                  {displayedMainClasses.map((course) => (
+                    <option key={course._id} value={course._id}>
+                      {course.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div>
               <label className="text-sm font-semibold text-foreground mb-2 block">
                 Batch
@@ -249,12 +380,15 @@ const AttendanceStatus = () => {
                 value={selectedBatchId}
                 onChange={(event) => setSelectedBatchId(event.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                disabled={isBatchLoading}
+                disabled={
+                  isBatchLoading ||
+                  (userRole === "Student" && !selectedMainClassId)
+                }
               >
                 <option value="" disabled>
                   Select a batch...
                 </option>
-                {displayedBatches.map((batch) => (
+                {selectableBatches.map((batch) => (
                   <option key={batch._id} value={batch._id}>
                     {batch.name} ({batch.startTime} - {batch.endTime})
                   </option>
