@@ -22,6 +22,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import useAuthStore from "../stores/useAuthStore";
 import useAttendanceStore from "../stores/useAttendanceStore";
+import useUserStore from "../stores/useUserStore";
 import toast from "react-hot-toast";
 import BackButton from "../components/UI/Button";
 import { filterBatchesForTeacher } from "../util/teacherAccessControl";
@@ -85,6 +86,10 @@ const AttendancePage = () => {
     clearError,
   } = useAttendanceStore();
 
+  // For hydrating student data with full profiles
+  const { students: allStudents, getStudents: getAllStudentsList } =
+    useUserStore();
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showBatchSelection, setShowBatchSelection] = useState(true);
 
@@ -105,10 +110,57 @@ const AttendancePage = () => {
   const getStudentId = (student) =>
     student?._id || student?.id || student?.studentId;
 
+  const studentLookup = useMemo(() => {
+    const lookup = new Map();
+    (allStudents || []).forEach((student) => {
+      [student?._id, student?.id, student?.studentId]
+        .filter(Boolean)
+        .forEach((id) => lookup.set(String(id), student));
+    });
+    return lookup;
+  }, [allStudents]);
+
+  const getNormalizedStudentId = (student) =>
+    student?._id || student?.id || student?.studentId;
+
+  const getStudentPhoto = (student) => {
+    const photo =
+      student?.profilePic ||
+      student?.profilePicture ||
+      student?.profile_picture ||
+      student?.photo ||
+      student?.image;
+
+    if (photo) return photo;
+
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(
+      student?.name || student?.email || "Student",
+    )}&background=e0e7ff&color=4f46e5`;
+  };
+
+  const hydratedStudents = useMemo(
+    () =>
+      (students || []).map((student) => {
+        const studentId = getNormalizedStudentId(student);
+        const fullStudent = studentLookup.get(String(studentId));
+        return fullStudent
+          ? { ...fullStudent, ...student, _id: fullStudent._id || studentId }
+          : student;
+      }),
+    [students, studentLookup],
+  );
+
   // Load user and batches on mount
   useEffect(() => {
     loadUser();
   }, [loadUser]);
+
+  // Load all students for hydration
+  useEffect(() => {
+    if (getAllStudentsList && (!allStudents || allStudents.length === 0)) {
+      getAllStudentsList();
+    }
+  }, [getAllStudentsList, allStudents]);
 
   useEffect(() => {
     if (userId && userRole) {
@@ -245,16 +297,20 @@ const AttendancePage = () => {
   const presentCount = Object.values(attendance).filter(checkIsPresent).length;
   const absentCount = totalStudents - presentCount;
 
-  const filteredStudents = students.filter((student) => {
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      student.name?.toLowerCase().includes(searchLower) ||
-      student.email?.toLowerCase().includes(searchLower) ||
-      String(getStudentId(student) || "")
-        .toLowerCase()
-        .includes(searchLower)
-    );
-  });
+  const filteredStudents = useMemo(
+    () =>
+      hydratedStudents.filter((student) => {
+        const searchLower = searchTerm.toLowerCase();
+        return (
+          student.name?.toLowerCase().includes(searchLower) ||
+          student.email?.toLowerCase().includes(searchLower) ||
+          String(getStudentId(student) || "")
+            .toLowerCase()
+            .includes(searchLower)
+        );
+      }),
+    [hydratedStudents, searchTerm],
+  );
 
   const displayedBatches = isAdmin
     ? batches
@@ -674,12 +730,17 @@ const AttendancePage = () => {
                                 }}
                               >
                                 <img
-                                  src={
-                                    student.profilePic ||
-                                    `https://ui-avatars.com/api/?name=${student.name || student.email || "Student"}&background=e0e7ff&color=4f46e5`
-                                  }
+                                  src={getStudentPhoto(student)}
                                   alt={student.name || "Student"}
                                   className="w-10 h-10 rounded-full object-cover border border-border"
+                                  onError={(e) => {
+                                    e.currentTarget.onerror = null;
+                                    e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                                      student?.name ||
+                                        student?.email ||
+                                        "Student",
+                                    )}&background=e0e7ff&color=4f46e5`;
+                                  }}
                                 />
                                 <div className="flex-1 min-w-0">
                                   <p className="font-semibold text-foreground truncate">
